@@ -199,6 +199,105 @@ Scheduled/cron runs happen in separate sessions from regular chat. If the user r
 
 ---
 
+### A scheduled job fabricates a result that doesn't exist
+
+**Symptom:** an automated search presented a specific, plausible-looking result (name, numbers, a link) — but on closer investigation, the agent itself admitted "I can't find any evidence this exists... looks like an error on my part."
+
+**Cause:** the model generated something that sounded plausible instead of admitting it found nothing, likely under the implicit pressure of "I should have results to show."
+
+**Fix:** add an explicit rule to the relevant skill:
+```markdown
+- Never present a result (listing, data point, link) without having verified the source loads real content in that specific search. If you can't verify it, exclude it or flag it explicitly as "unverified" — never present it with full details as if it were reliable.
+```
+
+---
+
+### Broken links get presented as valid anyway
+
+**Symptom:** a link returning a 403/404 got included regardless, with a soft "worth double-checking" caveat.
+
+**Cause:** no rule forced exclusion of an unverifiable source — a caveat isn't the same as a hard rule to drop it.
+
+**Fix:** same rule as above — a failed fetch means automatic exclusion, not a footnote.
+
+---
+
+### The agent conflates two different listings from the same source
+
+**Symptom:** two genuinely different postings from the same company got merged, with one's details (e.g. work modality) attributed to the other.
+
+**Cause:** the comparison only ran against the historical "already seen" log, never *within* the current batch of new results itself.
+
+**Fix:**
+```markdown
+- Before presenting a new batch of results, also compare them against EACH OTHER (not just the historical log), to catch duplicates or mixed-up details between similar entries.
+```
+
+---
+
+### "I'm going to do X now..." messages persist even with `tool_progress: off`
+
+**Symptom:** the agent kept narrating each step in chat, despite `display.tool_progress: off` being correctly set in `config.yaml`.
+
+**Cause:** that setting only controls Hermes's own *system-generated* tool-activity messages — it doesn't stop the model itself from choosing to write step-narration text as part of its normal response.
+
+**Fix:** an explicit instruction in `SOUL.md` (not `config.yaml`):
+```markdown
+## Communication During Multi-Step Tasks
+When performing a multi-step task, don't send intermediate messages narrating what you're about to do. Work silently through all necessary steps and respond once with the complete final result, unless you genuinely need to ask a question to proceed.
+```
+
+---
+
+### A skill doesn't reliably load during scheduled (cron) runs
+
+**Symptom:** a scheduled job evaluated things without apparent knowledge of rules/data that were in an installed skill, even though the skill was mentioned by name in the job's prompt text.
+
+**Cause:** each cron run happens in a fresh, isolated session — *mentioning* a skill in the prompt text doesn't guarantee it gets fully loaded, since that still depends on the model's own judgment.
+
+**Real fix:** formally attach the skill to the job itself, not just reference it in text:
+```bash
+hermes cron edit <job_id> --skill <skill-name>
+```
+Verify with `hermes cron list` — it should show a `Skills:` field on the job, not just a mention inside the prompt text. This guarantees the full skill loads every run, independent of the model's judgment call.
+
+---
+
+### A scheduled job possibly fires twice
+
+**Symptom:** the same scheduled job delivered two separate responses, with different content, the same day — without a manual re-trigger.
+
+**Likely cause:** two gateway processes running at once (each with its own independent scheduler tick), which can happen after an abrupt restart or an unexpectedly closed terminal session.
+
+**Diagnose it in the moment, if it happens again:**
+```bash
+ps aux | grep hermes-agent | grep -v grep
+```
+If more than one process with `gateway` in the command shows up, that's the cause:
+```bash
+hermes gateway restart
+```
+Honest caveat: by the time I investigated mine, no duplicate process was still around (likely cleaned up by a later WSL restart) — so I couldn't confirm the exact cause with certainty, just the most likely one per the official docs.
+
+---
+
+## Keeping the Windows auto-start task reliable long-term
+
+### An "At log on" trigger stops firing after a few days
+
+**Symptom:** WSL stopped auto-starting on its own after about a week, even with the laptop used daily — the task's "Last Run Result" in Task Scheduler showed a date over a week old.
+
+**Cause:** an **"At log on"** trigger only fires on a genuine fresh Windows login (username + password from scratch) — if your daily routine is just unlocking the screen instead of logging out/in, that trigger never fires again. And if WSL's own lightweight VM dies mid-day for any other reason (see the suspend/sleep entry above), nothing brings it back up until the next real login.
+
+**Fix:** make the task self-healing instead of depending on one single trigger event:
+1. Open Task Scheduler (`taskschd.msc`) → task properties → **Triggers** tab
+2. Edit the existing trigger → under **Advanced settings**, enable **"Repeat task every: 5 minutes"**
+3. Set **"for a duration of:"** to **"Indefinitely"**
+
+This is safe — if WSL is already running when the task repeats, nothing new gets created or duplicated, it just confirms it's still alive.
+
+---
+
 ## External integrations (I used Composio for Gmail/Drive/Docs)
 
 ### A quick "connect" grants way more access than you need
