@@ -301,12 +301,29 @@ Nota honesta: para cuando investigué el mío, ya no había ningún proceso dupl
 
 **Causa:** un disparador de tipo **"Al iniciar sesión"** solo se activa con un inicio de sesión genuino de Windows (usuario + contraseña desde cero) — si tu rutina diaria es solo desbloquear la pantalla (sin cerrar sesión), ese disparador nunca se vuelve a activar. Y si WSL se cae a mitad del día por cualquier otro motivo (ver la entrada de suspensión más arriba), nada lo vuelve a levantar hasta el siguiente inicio de sesión real.
 
-**Solución:** haz que la tarea se "auto-repare" sola, en vez de depender de un único disparo:
-1. Abre el Programador de tareas (`taskschd.msc`) → propiedades de la tarea → pestaña **Desencadenadores**
-2. Edita el disparador existente → en **Configuración avanzada**, activa **"Repetir la tarea cada: 5 minutos"**
-3. Cambia **"durante un periodo de:"** a **"Indefinidamente"**
+**Primer intento (tiene su propio bug, no lo uses):** agregar "Repetir la tarea cada: 5 minutos" con duración **"Indefinidamente"** al disparador existente. Suena razonable, pero es un **bug real y bien documentado de Windows Task Scheduler** (reportado desde Windows Server 2019 hasta Windows 11): combinar un disparador recurrente con duración "Indefinidamente" hace que la tarea deje de dispararse sola después de la primera vez, sin ningún error visible.
 
-Esto es seguro — si WSL ya está corriendo cuando la tarea se repite, no crea nada nuevo ni duplica procesos, solo confirma que sigue vivo.
+**Solución que sí funciona, según varias fuentes coincidentes:** reconstruye el disparador con estos ajustes específicos:
+1. Tipo de disparador: **"Con un horario"** → **"Diariamente"** (no "Al iniciar sesión")
+2. En **Configuración avanzada**: **"Repetir la tarea cada: 5 minutos"**
+3. **"durante un periodo de:"** → **"1 día"** (NO "Indefinidamente" — este es el cambio que corrige el bug)
+4. En la pestaña **Configuración** de la tarea: activa **"Ejecutar la tarea lo antes posible después de una ejecución programada perdida"**
+
+Con "Diariamente" + repetición durante 1 día, el ciclo se recarga solo cada 24 horas, evitando por completo el bug de la opción "Indefinidamente".
+
+---
+
+### La tarea abre una ventana de terminal visible cada vez que se repite
+
+**Síntoma:** después de aplicar el ajuste anterior, cada 5 minutos se abre (o se minimiza y reaparece) una ventana visible de la terminal de Ubuntu en el escritorio.
+
+**Causa:** confirmado en documentación oficial de Microsoft — la opción **"Ejecutar solo cuando el usuario haya iniciado sesión"** (la que evita que pida contraseña) hace que **cualquier ventana que abra la tarea sea visible en el escritorio, por diseño**. La alternativa que corre invisible ("Ejecutar tanto si el usuario inició sesión como si no") normalmente sí requiere contraseña.
+
+**Solución: usar ambas cosas a la vez, con una sola casilla que resuelve las dos necesidades**
+1. Selecciona **"Ejecutar tanto si el usuario inició sesión como si no"**
+2. Marca la casilla que aparece debajo: **"No almacenar la contraseña. La tarea solo tendrá acceso a los recursos locales"**
+
+Con esta combinación, la tarea corre de forma invisible (como debe ser) y **no pide ninguna contraseña** — la restricción de "solo recursos locales" no afecta nada aquí, ya que `wsl.exe -d Ubuntu --exec sleep infinity` no necesita acceder a ningún recurso de red.
 
 ---
 

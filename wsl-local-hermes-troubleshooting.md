@@ -289,12 +289,29 @@ Honest caveat: by the time I investigated mine, no duplicate process was still a
 
 **Cause:** an **"At log on"** trigger only fires on a genuine fresh Windows login (username + password from scratch) — if your daily routine is just unlocking the screen instead of logging out/in, that trigger never fires again. And if WSL's own lightweight VM dies mid-day for any other reason (see the suspend/sleep entry above), nothing brings it back up until the next real login.
 
-**Fix:** make the task self-healing instead of depending on one single trigger event:
-1. Open Task Scheduler (`taskschd.msc`) → task properties → **Triggers** tab
-2. Edit the existing trigger → under **Advanced settings**, enable **"Repeat task every: 5 minutes"**
-3. Set **"for a duration of:"** to **"Indefinitely"**
+**First attempt (has its own bug, don't use this one):** adding "Repeat task every: 5 minutes" with duration **"Indefinitely"** to the existing trigger. Sounds reasonable, but it's a **real, well-documented Windows Task Scheduler bug** (reported from Windows Server 2019 through Windows 11): pairing a recurring-style trigger with an "Indefinitely" duration makes the task silently stop firing after the first run, with no visible error.
 
-This is safe — if WSL is already running when the task repeats, nothing new gets created or duplicated, it just confirms it's still alive.
+**Fix that actually works, per multiple corroborating sources:** rebuild the trigger with these specific settings instead:
+1. Trigger type: **"On a schedule"** → **"Daily"** (not "At log on")
+2. Under **Advanced settings**: **"Repeat task every: 5 minutes"**
+3. **"for a duration of:"** → **"1 day"** (NOT "Indefinitely" — this is the change that fixes the bug)
+4. On the task's **Settings** tab: enable **"Run task as soon as possible after a scheduled start is missed"**
+
+With "Daily" + a 1-day repeat duration, the cycle refreshes itself every 24 hours, sidestepping the "Indefinitely" bug entirely.
+
+---
+
+### The task opens a visible terminal window every time it repeats
+
+**Symptom:** after applying the fix above, a visible Ubuntu terminal window pops up (or gets minimized and reappears) on the desktop every 5 minutes.
+
+**Cause:** confirmed in official Microsoft documentation — the **"Run only when user is logged on"** option (the one that avoids a password prompt) makes any window the task opens **visible on the desktop, by design**. The alternative that runs invisibly ("Run whether user is logged on or not") normally requires a password.
+
+**Fix: use both at once, via a checkbox that solves both needs simultaneously**
+1. Select **"Run whether user is logged on or not"**
+2. Check the box that appears beneath it: **"Do not store password. The task will only have access to local resources"**
+
+With this combination, the task runs invisibly (as intended) and **doesn't ask for any password** — the "local resources only" restriction doesn't matter here, since `wsl.exe -d Ubuntu --exec sleep infinity` doesn't need any network resource access.
 
 ---
 
